@@ -1,0 +1,82 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: payment-service
+
+  # ---- Database (Persistent MySQL for Production Standard) ----
+  datasource:
+    url: jdbc:mysql://localhost:3306/paymentdb?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  # ---- Kafka Configuration ----
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        # Increased from 500ms to 5000ms so initial topic metadata fetch succeeds
+        max.block.ms: 5000
+        reconnect.backoff.ms: 1000
+        reconnect.backoff.max.ms: 10000
+        spring.json.add.type.headers: false
+
+# Top-level direct keys to satisfy @Value("${razorpay.key-id}")
+razorpay:
+  key-id: rzp_test_TjhwUc1adtp2uX
+  key-secret: 5UVk7HNGveZTRo7H8SrPBxvv
+  webhook-secret: whsec_lFpKo324d1aS8nzO2im79NlO3Ym_skqT36q0Re_Dr08
+
+# payment.* alias to satisfy @ConfigurationProperties(prefix = "payment.razorpay")
+payment:
+  razorpay:
+    key-id: rzp_test_TjhwUc1adtp2uX
+    key-secret: 5UVk7HNGveZTRo7H8SrPBxvv
+    webhook-secret: whsec_lFpKo324d1aS8nzO2im79NlO3Ym_skqT36q0Re_Dr08
+
+# Namespaced configuration
+tickethub:
+  kafka:
+    enabled: true
+    payment-topic: payment-events
+
+  payment:
+    gateway: ${PAYMENT_GATEWAY:razorpay}
+    allowed-currencies:
+      - INR
+
+    razorpay:
+      key-id: rzp_test_TjhwUc1adtp2uX
+      key-secret: 5UVk7HNGveZTRo7H8SrPBxvv
+      webhook-secret: whsec_lFpKo324d1aS8nzO2im79NlO3Ym_skqT36q0Re_Dr08
+      manual-capture: false
+    sync:
+      enabled: true
+      delay-ms: 60000
+      min-age-seconds: 120
+      max-age-minutes: 120
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.tickethub: INFO
+    org.apache.kafka: INFO
+    org.springframework.kafka: INFO

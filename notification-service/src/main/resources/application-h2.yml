@@ -1,0 +1,7 @@
+# Run without MySQL:  --spring.profiles.active=h2   (data is lost on restart)
+spring:
+  datasource:
+    url: jdbc:h2:mem:notificationdb;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver

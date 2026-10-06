@@ -1,0 +1,180 @@
+# =====================================================================
+#  TicketHub - API Gateway (Port 8090)
+# =====================================================================
+server:
+  port: ${SERVER_PORT:8090}
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 3000
+        response-timeout: 30s
+
+      globalcors:
+        add-to-simple-url-handler-mapping: true
+        cors-configurations:
+          '[/**]':
+            allowed-origin-patterns: ${CORS_ALLOWED_ORIGINS:*}
+            allowed-methods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowed-headers: "*"
+            exposed-headers:
+              - X-Request-Id
+              - Retry-After
+            allow-credentials: false
+            max-age: 3600
+
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST
+
+      # ------------------------------------------------------------------
+      #  ROUTES
+      # ------------------------------------------------------------------
+      routes:
+        # ---- user-service (Port 8089) ----
+        - id: user-service
+          uri: ${USER_SERVICE_URI:http://localhost:8089}
+          predicates:
+            - Path=/api/auth/**,/api/users/**,/api/admin/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userServiceCB
+                fallbackUri: forward:/fallback/user-service
+
+        # ---- booking-service (Port 8083) ----
+        - id: booking-service
+          uri: ${BOOKING_SERVICE_URI:http://localhost:8083}
+          predicates:
+            - Path=/bookings/**,/razorpay-checkout-test.html
+          metadata:
+            connect-timeout: 3000
+            response-timeout: 60000
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: bookingServiceCB
+                fallbackUri: forward:/fallback/booking-service
+
+        # ---- event-service (ticket-hub: Port 8080) ----
+        - id: event-service
+          uri: ${EVENT_SERVICE_URI:http://localhost:8080}
+          predicates:
+            - Path=/api/events/**,/api/venues/**,/api/shows/**,/api/v1/shows/**,/api/v1/venues/**,/api/v1/halls/**,/api/v1/seats/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCB
+                fallbackUri: forward:/fallback/event-service
+
+        # ---- payment-service (Port 8081: Webhook & Customer APIs) ----
+        - id: payment-service
+          uri: ${PAYMENT_SERVICE_URI:http://localhost:8081}
+          predicates:
+            - Path=/api/v1/payments/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: paymentServiceCB
+                fallbackUri: forward:/fallback/payment-service
+
+        # ---- notification-service (Port 8085) ----
+        - id: notification-service
+          uri: ${NOTIFICATION_SERVICE_URI:http://localhost:8085}
+          predicates:
+            - Path=/api/notifications/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: notificationServiceCB
+                fallbackUri: forward:/fallback/notification-service
+
+# ---------------- Eureka Configuration ----------------
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+    registry-fetch-interval-seconds: 5
+  instance:
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}
+    prefer-ip-address: true
+
+# ---------------- Gateway Security Rules ----------------
+gateway:
+  security:
+    # SYNCHRONIZED with user-service and booking-service secret
+    jwt-secret: ${JWT_SECRET:p0fcz/R5hN4eI6n2Em7FN+JVUUsJD21Pl/paji/1Dpw=}
+    default-access: AUTHENTICATED
+    rules:
+      - methods: [OPTIONS]
+        paths: [/**]
+        access: PUBLIC
+
+      # --- user-service ---
+      - methods: [POST]
+        paths: [/api/auth/register, /api/auth/login]
+        access: PUBLIC
+      - paths: [/api/admin/**]
+        access: ADMIN
+      - paths: [/api/users/**]
+        access: AUTHENTICATED
+
+      # --- notification-service ---
+      - paths: [/api/notifications/**]
+        access: ADMIN
+
+      # --- payment-service ---
+      - methods: [POST]
+        paths: [/api/v1/payments/webhook]
+        access: PUBLIC
+      - paths: [/api/v1/payments/**]
+        access: AUTHENTICATED
+
+      # --- event-service ---
+      - methods: [GET, HEAD]
+        paths: [/api/events/**, /api/venues/**, /api/shows/**, /api/v1/shows/**, /api/v1/venues/**, /api/v1/halls/**, /api/v1/seats/**]
+        access: PUBLIC
+      - paths: [/api/events/**, /api/venues/**, /api/shows/**, /api/v1/shows/**, /api/v1/venues/**, /api/v1/halls/**, /api/v1/seats/**]
+        access: ADMIN
+
+      # --- booking-service ---
+      - methods: [GET]
+        paths: [/razorpay-checkout-test.html]
+        access: PUBLIC
+      - paths: [/bookings/**]
+        access: AUTHENTICATED
+
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    default-limit: 300
+    window-seconds: 60
+    rules:
+      - paths: [/api/auth/**]
+        limit: 10
+      - paths: [/bookings/**]
+        limit: 60
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    com.tickethub.gateway: INFO
+    com.netflix.discovery: WARN
+    com.netflix.eureka: WARN

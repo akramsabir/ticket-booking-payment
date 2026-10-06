@@ -1,0 +1,167 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: booking-service
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/bookingdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+  # Stable PageImpl JSON serialization for Spring Boot 3.3+
+  data:
+    web:
+      pageable:
+        serialization-mode: via_dto
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Without a JSON serializer every booking event fails to send (the default is the String serializer).
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        # If Kafka is not running, give up quickly instead of making the request wait (default would be 60 seconds)
+        max.block.ms: 1000
+        # notification-service reads plain JSON text, so no Java class names in the message headers
+        spring.json.add.type.headers: false
+
+# Eureka Discovery Configuration
+eureka:
+  client:
+    # Set to false if you are running services locally without a Eureka Server
+    enabled: ${EUREKA_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+
+# Direct service URLs for Feign/RestClient when Eureka is bypassed locally
+services:
+  event-service:
+    url: ${EVENT_SERVICE_URL:http://localhost:8080}
+  payment-service:
+    url: ${PAYMENT_SERVICE_URL:http://localhost:8081}
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 3000
+        readTimeout: 3000
+
+# Spring Cloud OpenFeign 4.x reads its settings from this prefix. payment-service gets a longer read timeout
+# because creating a Razorpay order is a real network call to Razorpay made on our behalf.
+spring.cloud.openfeign.client.config:
+  payment-service:
+    connect-timeout: 3000
+    read-timeout: 15000
+  # The confirmation email asks event-service for the show title; a slow answer must not hold up a booking
+  event-service:
+    connect-timeout: 2000
+    read-timeout: 3000
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      eventService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 5
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+      paymentService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 5
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        # "invalid signature" / "no such order" are answers, not outages: do not count them as failures
+        ignore-exceptions:
+          - com.tickethub.booking.exception.PaymentClientException
+
+  retry:
+    instances:
+      eventService:
+        max-attempts: 3
+        wait-duration: 1s
+      paymentService:
+        max-attempts: 3
+        wait-duration: 1s
+        # retrying a "no" never turns it into a "yes"
+        ignore-exceptions:
+          - com.tickethub.booking.exception.PaymentClientException
+
+  ratelimiter:
+    instances:
+      eventService:
+        limit-for-period: 10
+        limit-refresh-period: 1s
+        timeout-duration: 0
+      paymentService:
+        limit-for-period: 10
+        limit-refresh-period: 1s
+        timeout-duration: 0
+
+# Business Workflow Settings
+booking:
+  payment:
+    enabled: true
+  expiry:
+    minutes: 10
+    scan-ms: 60000
+  reconcile:
+    # how often we ask payment-service about bookings that are waiting for payment (confirms webhook-only payments)
+    scan-ms: 15000
+  kafka:
+    # booking-events is what makes notification-service email the customer when a booking is confirmed.
+    # Running without a Kafka broker? Start with BOOKING_KAFKA_ENABLED=false (bookings work; no emails).
+    enabled: ${BOOKING_KAFKA_ENABLED:true}
+    topic: booking-events
+  security:
+    # Booking trusts tokens signed with THIS secret, so it MUST be exactly the same value as user-service's app.jwt.secret
+    # (user-service reads it from the JWT_SECRET environment variable). At least 32 characters.
+    # The default below equals user-service's local-development default so both work out of the box on your laptop.
+    # Anywhere real: set JWT_SECRET on BOTH services to a long random value and never commit it.
+    jwt-secret: ${JWT_SECRET:p0fcz/R5hN4eI6n2Em7FN+JVUUsJD21Pl/paji/1Dpw=}
+
+# Swagger / Springdoc OpenAPI configuration
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    try-it-out-enabled: true
+
+# Actuator Observability & Health
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: INFO
+    com.tickethub.booking: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

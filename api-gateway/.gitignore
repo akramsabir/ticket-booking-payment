@@ -1,0 +1,19 @@
+# Compiled files & build outputs
+target/
+*.class
+
+# IDE & Editor files
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# Archive files
+*.zip
+*.tar.gz
+
+# Environment & OS files
+.env
+.DS_Store
+Thumbs.db

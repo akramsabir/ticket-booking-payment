@@ -1,0 +1,112 @@
+# =====================================================================
+#  TicketHub - Notification Service
+#  Port updated to 8085 to avoid service collisions
+# =====================================================================
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: notification-service
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/notificationdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    show-sql: false
+
+  # ---------------- Email (Gmail SMTP) ----------------
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:akramsabir1122@gmail.com}
+    password: ${MAIL_PASSWORD:zguy ascf vmzk zdfg}
+    properties:
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${MAIL_STARTTLS:true}
+      mail.smtp.starttls.required: true
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+
+  # ---------------- Kafka ----------------
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${NOTIFICATION_KAFKA_GROUP:notification-service}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: 3000
+    admin:
+      properties:
+        request.timeout.ms: 5000
+        default.api.timeout.ms: 8000
+
+# ---------------- Notification service settings ----------------
+notification:
+  mail:
+    from: ${MAIL_FROM:akramsabir1122@gmail.com}
+    from-name: ${MAIL_FROM_NAME:TicketHub}
+    support-email: ${MAIL_SUPPORT:akramsabir1122@gmail.com}
+    brand-name: TicketHub
+    blocked-domains: ${MAIL_BLOCKED_DOMAINS:}
+
+  retry:
+    max-attempts: 5
+    initial-backoff-seconds: 30
+    multiplier: 2.0
+    max-backoff-seconds: 1800
+    scan-ms: 15000
+    lease-seconds: 120
+    batch-size: 50
+
+  kafka:
+    enabled: ${NOTIFICATION_KAFKA_ENABLED:true}
+    payment-topic: ${PAYMENT_TOPIC:payment-events}
+    booking-topic: ${BOOKING_TOPIC:booking-events}
+    group-id: ${NOTIFICATION_KAFKA_GROUP:notification-service}
+
+  security:
+    api-key: ${NOTIFICATION_API_KEY:}
+
+  events:
+    enabled:
+      # Enabled so both the payment receipt email and the booking confirmation email are sent
+      payment-success: true
+      payment-failed: true
+      payment-refunded: true
+      booking-confirmed: true
+      booking-cancelled: true
+      booking-expired: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+  health:
+    mail:
+      enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.tickethub.notification: DEBUG
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

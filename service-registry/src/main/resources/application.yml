@@ -1,0 +1,41 @@
+# =====================================================================
+#  TicketHub - Service Registry (Eureka server)
+#  Standalone mode: this is the ONLY registry, so it does not register with itself
+#  or fetch a registry from anyone else.
+# =====================================================================
+server:
+  port: ${SERVER_PORT:8761}          # booking-service already expects Eureka on 8761
+
+spring:
+  application:
+    name: service-registry
+
+eureka:
+  instance:
+    hostname: ${EUREKA_HOSTNAME:localhost}
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+  server:
+    # --- Local development settings: a stopped service disappears from the dashboard in ~15-20 seconds. ---
+    # Self-preservation keeps "dead" instances for a long time when many heartbeats are missed. That protects a
+    # big production cluster from a network glitch, but on a laptop it only shows you services that are not running.
+    # For production set EUREKA_SELF_PRESERVATION=true and remove the two timers below.
+    enable-self-preservation: ${EUREKA_SELF_PRESERVATION:false}
+    eviction-interval-timer-in-ms: 5000
+    response-cache-update-interval-ms: 3000
+    wait-time-in-ms-when-sync-empty: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    root: INFO
+    com.netflix.eureka: INFO
+    com.netflix.discovery: INFO

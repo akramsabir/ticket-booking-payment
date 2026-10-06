@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:notificationtest;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  mail:
+    host: localhost
+    port: 3025
+
+notification:
+  kafka:
+    enabled: false
+  security:
+    api-key: ""
+  retry:
+    scan-ms: 3600000      # keep the scheduler quiet during tests
+  events:
+    enabled:
+      payment-success: true   # production default is false (one success email); these tests exercise the receipt feature itself

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TicketHub - Razorpay checkout test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  DEVELOPER TOOL (delete before production). Open: http://localhost:8083/razorpay-checkout-test.html
+  It is also a minimal REFERENCE for the real frontend. The flow is exactly:
+    1. POST /bookings                        -> booking (PENDING) + payment { razorpayKeyId, razorpayOrderId, amountInMinorUnits }
+    2. new Razorpay({...}).open()            -> customer pays INSIDE Razorpay's popup (we never touch card data)
+    3. handler(response) gets 3 values       -> POST /bookings/{id}/payment/verify with them
+    4. response.status == "CONFIRMED"        -> show the ticket
+-->
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1c1c1c; }
+  h1 { font-size: 20px; } label { display:block; margin-top: 10px; font-size: 13px; color:#555; }
+  input { width: 100%; padding: 8px; box-sizing: border-box; }
+  button { margin-top: 14px; padding: 10px 16px; cursor: pointer; }
+  pre { background: #f4f4f6; padding: 12px; overflow: auto; font-size: 12px; border-radius: 6px; }
+  .row { display: flex; gap: 12px; } .row > div { flex: 1; }
+  #status { margin-top: 12px; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>TicketHub - Razorpay checkout test</h1>
+<p>Use Razorpay <b>test</b> keys. Test UPI: <code>success@razorpay</code> (fails: <code>failure@razorpay</code>).
+   Test card: <code>4111 1111 1111 1111</code>, any future expiry, any CVV, OTP <code>1234</code>.</p>
+
+<label>JWT token (log in at user-service first: POST http://localhost:8082/api/auth/login, copy the "token" value)</label>
+<input id="token" placeholder="eyJhbGciOi...">
+<p style="font-size:12px;color:#555">The customer is the logged-in user (from the token); you no longer send a customerId.</p>
+<div class="row">
+  <div><label>showId</label><input id="showId" value="1"></div>
+</div>
+<label>seatIds = the show-seat "id" values from GET /api/shows/{showId}/seats (comma separated)</label>
+<input id="seatIds" value="1,2">
+
+<button id="go">1. Create booking and pay</button>
+<button id="cancel" disabled>Cancel booking</button>
+<div id="status"></div>
+<h3>Last response</h3>
+<pre id="out">-</pre>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let booking = null;
+
+function show(label, data) {
+  $('out').textContent = label + '\n' + JSON.stringify(data, null, 2);
+}
+function setStatus(text) { $('status').textContent = text; }
+
+async function api(path, options) {
+  const headers = Object.assign({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + $('token').value.trim() },
+                                (options && options.headers) || {});
+  const res = await fetch(path, Object.assign({}, options, { headers }));
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!res.ok) { show('HTTP ' + res.status, body); throw new Error((body && body.message) || ('HTTP ' + res.status) + (res.status === 401 ? ' - paste a fresh token' : '')); }
+  return body;
+}
+
+$('go').onclick = async () => {
+  try {
+    setStatus('Creating booking...');
+    booking = await api('/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        showId: Number($('showId').value),
+        seatIds: $('seatIds').value.split(',').map(s => s.trim()).filter(Boolean)
+      })
+    });
+    show('Booking created', booking);
+    $('cancel').disabled = false;
+    if (!booking.payment) { setStatus('No payment info: is booking.payment.enabled=true?'); return; }
+    openCheckout(booking);
+  } catch (e) { setStatus('Error: ' + e.message); }
+};
+
+function openCheckout(b) {
+  const p = b.payment;
+  const rzp = new Razorpay({
+    key: p.razorpayKeyId,            // PUBLIC key id from our server
+    order_id: p.razorpayOrderId,     // the order our server created - the amount is already fixed inside it
+    amount: p.amountInMinorUnits,    // shown to the customer (paise)
+    currency: p.currency,
+    name: 'TicketHub',
+    description: 'Booking #' + b.id,
+    handler: async function (response) {
+      // response = { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+      try {
+        setStatus('Verifying payment...');
+        const result = await api('/bookings/' + b.id + '/payment/verify', {
+          method: 'POST', body: JSON.stringify(response)
+        });
+        show('Verify result', result);
+        setStatus('Booking is ' + result.status);
+      } catch (e) { setStatus('Verify failed: ' + e.message); }
+    },
+    modal: { ondismiss: () => setStatus('Checkout closed. The booking stays PENDING until it expires - click again to retry.') }
+  });
+  rzp.on('payment.failed', r => { show('payment.failed', r.error); setStatus('Payment failed: ' + r.error.description + ' (you can retry in the popup)'); });
+  rzp.open();
+}
+
+$('cancel').onclick = async () => {
+  try {
+    await api('/bookings/' + booking.id, { method: 'DELETE' });
+    setStatus('Booking ' + booking.id + ' cancelled'); $('cancel').disabled = true;
+  } catch (e) { setStatus('Cancel failed: ' + e.message); }
+};
+</script>
+</body>
+</html>
